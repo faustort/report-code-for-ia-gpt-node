@@ -50,10 +50,7 @@ function selecionarPastasCLI(base, lang) {
       .readdirSync(base)
       .filter((item) => fs.statSync(path.join(base, item)).isDirectory());
 
-    if (!process.stdin.isTTY) {
-      console.log('Terminal não suporta modo interativo');
-      return resolve(ignorarPastas);
-    }
+    if (!process.stdin.isTTY) return resolve(ignorarPastas);
 
     let index = 0;
     let selecionadas = new Set(ignorarPastas);
@@ -86,14 +83,11 @@ function selecionarPastasCLI(base, lang) {
     function onKeypress(str, key) {
       if (!key) return;
 
-      if (key.name === 'down') {
-        index = (index + 1) % dirs.length;
-      } else if (key.name === 'up') {
-        index = (index - 1 + dirs.length) % dirs.length;
-      } else if (key.name === 'space') {
+      if (key.name === 'down') index = (index + 1) % dirs.length;
+      else if (key.name === 'up') index = (index - 1 + dirs.length) % dirs.length;
+      else if (key.name === 'space') {
         const dir = dirs[index];
-        if (selecionadas.has(dir)) selecionadas.delete(dir);
-        else selecionadas.add(dir);
+        selecionadas.has(dir) ? selecionadas.delete(dir) : selecionadas.add(dir);
       } else if (key.name === 'return') {
         cleanup();
         console.clear();
@@ -107,39 +101,32 @@ function selecionarPastasCLI(base, lang) {
     }
 
     process.stdin.on('keypress', onKeypress);
-
     render();
   });
 }
 
-// ================= I18N =================
-function t(lang, key) {
-  const dict = {
-    pt: {
-      header: `\n🚀 ${APP_NAME}\nPreparando seu projeto para IA\n`,
-      pasta: 'Pasta alvo (enter = ./): ',
-      ignoradas: 'Pastas ignoradas:',
-      git: 'Ignorar arquivos gerados no .gitignore? (s/N): ',
-      gerando: 'Gerando contexto...',
-      pronto: 'Arquivo gerado:',
-      git_nao_existe: '.gitignore não encontrado',
-      ja_existe: 'Já existe no .gitignore',
-      adicionado: 'Regra adicionada ao .gitignore',
-    },
-    en: {
-      header: `\n🚀 ${APP_NAME}\nPreparing your project for AI\n`,
-      pasta: 'Target folder (enter = ./): ',
-      ignoradas: 'Ignored folders:',
-      git: 'Ignore generated files in .gitignore? (y/N): ',
-      gerando: 'Generating context...',
-      pronto: 'File generated:',
-      git_nao_existe: '.gitignore not found',
-      ja_existe: 'Already exists in .gitignore',
-      adicionado: 'Rule added to .gitignore',
-    },
-  };
+// ================= TREE =================
+function gerarEstrutura(dir, prefix = '') {
+  let resultado = '';
+  const itens = fs.readdirSync(dir);
 
-  return dict[lang][key];
+  itens.forEach((item, idx) => {
+    if (ignorarPastas.includes(item)) return;
+
+    const full = path.join(dir, item);
+    const stat = fs.statSync(full);
+
+    const isLast = idx === itens.length - 1;
+    const branch = isLast ? '└── ' : '├── ';
+
+    resultado += prefix + branch + item + '\n';
+
+    if (stat.isDirectory()) {
+      resultado += gerarEstrutura(full, prefix + (isLast ? '    ' : '│   '));
+    }
+  });
+
+  return resultado;
 }
 
 // ================= CORE =================
@@ -180,20 +167,12 @@ function atualizarGitignore(lang) {
   const gitPath = path.join(process.cwd(), '.gitignore');
   const regra = '_report-code-for-ia-gpt-*';
 
-  if (!fs.existsSync(gitPath)) {
-    console.log(t(lang, 'git_nao_existe'));
-    return;
-  }
+  if (!fs.existsSync(gitPath)) return;
 
   const conteudo = fs.readFileSync(gitPath, 'utf8');
-
-  if (conteudo.includes(regra)) {
-    console.log(t(lang, 'ja_existe'));
-    return;
-  }
+  if (conteudo.includes(regra)) return;
 
   fs.appendFileSync(gitPath, `\n${regra}\n`);
-  console.log(t(lang, 'adicionado'));
 }
 
 // ================= EXEC =================
@@ -201,31 +180,40 @@ async function main() {
   const langInput = await perguntar('Idioma / Language (pt/en) [pt]: ');
   const lang = langInput.trim().toLowerCase() === 'en' ? 'en' : 'pt';
 
-  console.log(t(lang, 'header'));
+  console.log(`\n🚀 ${APP_NAME}\n`);
 
-  const pasta = await perguntar(t(lang, 'pasta'));
+  const pasta = await perguntar('Pasta (./): ');
   const base = path.resolve(pasta || './');
 
-  const selecionadas = await selecionarPastasCLI(base, lang);
-  ignorarPastas = selecionadas;
+  ignorarPastas = await selecionarPastasCLI(base, lang);
 
-  console.log('\n' + t(lang, 'ignoradas'));
-  console.log(ignorarPastas.join(', '));
+  const onlyTree = await perguntar(
+    lang === 'pt' ? '\nExportar apenas estrutura? (s/N): ' : '\nExport structure only? (y/N): '
+  );
 
-  const gitResp = await perguntar('\n' + t(lang, 'git'));
+  const gitResp = await perguntar(
+    lang === 'pt'
+      ? 'Ignorar arquivo no .gitignore? (s/N): '
+      : 'Ignore output in .gitignore? (y/N): '
+  );
+
   if (['s', 'y'].includes(gitResp.toLowerCase())) {
     atualizarGitignore(lang);
   }
 
-  console.log('\n' + t(lang, 'gerando'));
+  console.log('\nGerando...\n');
 
-  let output = `${APP_NAME}\n====================\n`;
-  output += `Generated at: ${new Date().toISOString()}\n\n`;
-  output += coletar(base);
+  let output = `${APP_NAME}\n====================\n\n`;
+
+  if (['s', 'y'].includes(onlyTree.toLowerCase())) {
+    output += gerarEstrutura(base);
+  } else {
+    output += coletar(base);
+  }
 
   fs.writeFileSync(outputFile, output, 'utf8');
 
-  console.log(`${t(lang, 'pronto')} ${outputFile}\n`);
+  console.log(`✔ ${outputFile}`);
 }
 
 main();
