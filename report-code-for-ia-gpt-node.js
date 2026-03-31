@@ -18,7 +18,7 @@ let outputFile = gerarNomeArquivo();
 // ================= UTIL =================
 function gerarNomeArquivo() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  return `_repost-code-for-ia-gpt-${ts}.txt`;
+  return `_report-code-for-ia-gpt-${ts}.txt`;
 }
 
 function limparCodigo(txt = '') {
@@ -43,34 +43,99 @@ function perguntar(q) {
   );
 }
 
+// ================= SELECT CLI =================
+function selecionarPastasCLI(base, lang) {
+  return new Promise((resolve) => {
+    const dirs = fs
+      .readdirSync(base)
+      .filter((item) => fs.statSync(path.join(base, item)).isDirectory());
+
+    if (!process.stdin.isTTY) {
+      console.log('Terminal não suporta modo interativo');
+      return resolve(ignorarPastas);
+    }
+
+    let index = 0;
+    let selecionadas = new Set(ignorarPastas);
+
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    function render() {
+      console.clear();
+      console.log(
+        lang === 'pt'
+          ? '↑ ↓ navegar | espaço marcar | enter confirmar\n'
+          : '↑ ↓ navigate | space toggle | enter confirm\n'
+      );
+
+      dirs.forEach((dir, i) => {
+        const cursor = i === index ? '❯' : ' ';
+        const checked = selecionadas.has(dir) ? '◉' : '◯';
+        console.log(`${cursor} ${checked} ${dir}`);
+      });
+    }
+
+    function cleanup() {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener('keypress', onKeypress);
+    }
+
+    function onKeypress(str, key) {
+      if (!key) return;
+
+      if (key.name === 'down') {
+        index = (index + 1) % dirs.length;
+      } else if (key.name === 'up') {
+        index = (index - 1 + dirs.length) % dirs.length;
+      } else if (key.name === 'space') {
+        const dir = dirs[index];
+        if (selecionadas.has(dir)) selecionadas.delete(dir);
+        else selecionadas.add(dir);
+      } else if (key.name === 'return') {
+        cleanup();
+        console.clear();
+        return resolve([...selecionadas]);
+      } else if (key.ctrl && key.name === 'c') {
+        cleanup();
+        process.exit();
+      }
+
+      render();
+    }
+
+    process.stdin.on('keypress', onKeypress);
+
+    render();
+  });
+}
+
 // ================= I18N =================
 function t(lang, key) {
   const dict = {
     pt: {
       header: `\n🚀 ${APP_NAME}\nPreparando seu projeto para IA\n`,
       pasta: 'Pasta alvo (enter = ./): ',
-      ignorar: 'Pastas para ignorar (use espaço): ',
       ignoradas: 'Pastas ignoradas:',
-      git: 'Adicionar regra no .gitignore? (s/N): ',
-      wildcard: 'Digite wildcard (ex: *.log): ',
+      git: 'Ignorar arquivos gerados no .gitignore? (s/N): ',
       gerando: 'Gerando contexto...',
       pronto: 'Arquivo gerado:',
       git_nao_existe: '.gitignore não encontrado',
       ja_existe: 'Já existe no .gitignore',
-      adicionado: 'Adicionado ao .gitignore',
+      adicionado: 'Regra adicionada ao .gitignore',
     },
     en: {
       header: `\n🚀 ${APP_NAME}\nPreparing your project for AI\n`,
       pasta: 'Target folder (enter = ./): ',
-      ignorar: 'Folders to ignore (space separated): ',
       ignoradas: 'Ignored folders:',
-      git: 'Add rule to .gitignore? (y/N): ',
-      wildcard: 'Enter wildcard (e.g. *.log): ',
+      git: 'Ignore generated files in .gitignore? (y/N): ',
       gerando: 'Generating context...',
       pronto: 'File generated:',
       git_nao_existe: '.gitignore not found',
       ja_existe: 'Already exists in .gitignore',
-      adicionado: 'Added to .gitignore',
+      adicionado: 'Rule added to .gitignore',
     },
   };
 
@@ -111,8 +176,9 @@ function coletar(dir) {
 }
 
 // ================= GITIGNORE =================
-function atualizarGitignore(wildcard, lang) {
+function atualizarGitignore(lang) {
   const gitPath = path.join(process.cwd(), '.gitignore');
+  const regra = '_report-code-for-ia-gpt-*';
 
   if (!fs.existsSync(gitPath)) {
     console.log(t(lang, 'git_nao_existe'));
@@ -121,12 +187,12 @@ function atualizarGitignore(wildcard, lang) {
 
   const conteudo = fs.readFileSync(gitPath, 'utf8');
 
-  if (conteudo.includes(wildcard)) {
+  if (conteudo.includes(regra)) {
     console.log(t(lang, 'ja_existe'));
     return;
   }
 
-  fs.appendFileSync(gitPath, `\n${wildcard}\n`);
+  fs.appendFileSync(gitPath, `\n${regra}\n`);
   console.log(t(lang, 'adicionado'));
 }
 
@@ -140,22 +206,15 @@ async function main() {
   const pasta = await perguntar(t(lang, 'pasta'));
   const base = path.resolve(pasta || './');
 
-  const ignorar = await perguntar(t(lang, 'ignorar'));
-  if (ignorar.trim()) {
-    const extras = ignorar
-      .split(' ')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    ignorarPastas = [...ignorarPastas, ...extras];
-  }
+  const selecionadas = await selecionarPastasCLI(base, lang);
+  ignorarPastas = selecionadas;
 
   console.log('\n' + t(lang, 'ignoradas'));
   console.log(ignorarPastas.join(', '));
 
   const gitResp = await perguntar('\n' + t(lang, 'git'));
   if (['s', 'y'].includes(gitResp.toLowerCase())) {
-    const wildcard = await perguntar(t(lang, 'wildcard'));
-    if (wildcard.trim()) atualizarGitignore(wildcard.trim(), lang);
+    atualizarGitignore(lang);
   }
 
   console.log('\n' + t(lang, 'gerando'));
