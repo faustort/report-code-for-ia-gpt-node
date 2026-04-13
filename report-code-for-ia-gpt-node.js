@@ -509,7 +509,13 @@ async function main() {
   const extensoesPermitidas = opts.ext ?? DEFAULT_EXTENSIONS;
   const tamanhoMax = opts.maxSize ?? DEFAULT_MAX_SIZE_BYTES;
   const stripComments = opts.stripComments;
-  const outputFile = opts.output ?? gerarNomeArquivo();
+
+  // Ajuste: output sempre em /temp, criando diretório se necessário
+  const tempDir = path.join(process.cwd(), 'temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const outputFile = opts.output ?? path.join(tempDir, gerarNomeArquivo());
 
   // ---- Geração ----
   console.log(lang === 'pt' ? '\nGerando...\n' : '\nGenerating...\n');
