@@ -510,12 +510,21 @@ async function main() {
   const tamanhoMax = opts.maxSize ?? DEFAULT_MAX_SIZE_BYTES;
   const stripComments = opts.stripComments;
 
-  // Ajuste: output sempre em /temp, criando diretório se necessário
-  const tempDir = path.join(process.cwd(), 'temp');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
+  // Ajuste: garante que o diretório do arquivo de saída exista
+  let outputFile;
+  if (opts.output) {
+    outputFile = opts.output;
+    const outputDir = path.dirname(path.resolve(outputFile));
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+  } else {
+    const tempDir = path.join(process.cwd(), 'scripts', 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    outputFile = path.join(tempDir, gerarNomeArquivo());
   }
-  const outputFile = opts.output ?? path.join(tempDir, gerarNomeArquivo());
 
   // ---- Geração ----
   console.log(lang === 'pt' ? '\nGerando...\n' : '\nGenerating...\n');
